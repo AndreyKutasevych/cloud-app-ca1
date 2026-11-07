@@ -4,12 +4,32 @@ import { TransactionCanceledException } from "@aws-sdk/client-dynamodb";
 import { actorKey, ddb, movieKey, type Role, tableName } from "../shared/db";
 import { isResponse, parseJsonObject, response } from "../shared/http";
 
+// IDs are JSON numbers (not strings) and must be positive integers.
+const isPositiveInteger = (value: unknown): boolean =>
+  Number.isInteger(value) && (value as number) > 0;
+const isNonEmptyString = (value: unknown): boolean =>
+  typeof value === "string" && value.trim() !== "";
+
 export const handler = async (
   event: APIGatewayProxyEvent
 ): Promise<APIGatewayProxyResult> => {
   const body = parseJsonObject(event);
   if (isResponse(body)) return body;
 
+    const invalidFields = [
+    ["movieId", isPositiveInteger(body.movieId)],
+    ["actorId", isPositiveInteger(body.actorId)],
+    ["roleName", isNonEmptyString(body.roleName)],
+    ["roleDescription", isNonEmptyString(body.roleDescription)],
+  ]
+    .filter(([, valid]) => !valid)
+    .map(([field]) => field);
+  if (invalidFields.length) {
+    return response(400, {
+      message: `Missing or invalid fields: ${invalidFields.join(", ")}`,
+    });
+  }
+  
   const role: Role = {
     movieId: body.movieId as number,
     actorId: body.actorId as number,
