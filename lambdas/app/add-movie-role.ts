@@ -7,7 +7,7 @@ import { logRequest } from "../shared/request-logger";
 
 // IDs are JSON numbers (not strings) and must be positive integers.
 const isPositiveInteger = (value: unknown): boolean =>
-  Number.isInteger(value) && (value as number) > 0;
+  Number.isSafeInteger(value) && (value as number) > 0;
 const isNonEmptyString = (value: unknown): boolean =>
   typeof value === "string" && value.trim() !== "";
 
