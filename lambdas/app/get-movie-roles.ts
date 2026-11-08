@@ -1,8 +1,8 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
-import { GetCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { QueryCommand } from "@aws-sdk/lib-dynamodb";
 import {
-  actorKey,
   ddb,
+  getRole,
   isMovieItem,
   isRoleItem,
   movieKey,
@@ -10,7 +10,7 @@ import {
   tableName,
   toRole,
 } from "../shared/db";
-import { response } from "../shared/http";
+import { response, serverError } from "../shared/http";
 import { logRequest } from "../shared/request-logger";
 
 export const handler = async (
@@ -30,20 +30,15 @@ export const handler = async (
   }
 
   try {
-    // ?actor=... : a role item is keyed m#movieID | a#actorID, so fetch it directly.
+    // ?actor=... : fetch that one role directly.
     if (actorId !== undefined) {
-      const roleResult = await ddb.send(
-        new GetCommand({
-          TableName: tableName,
-          Key: { PK: movieKey(movieId), SK: actorKey(actorId) },
-        })
-      );
-      if (!roleResult.Item) {
+      const role = await getRole(movieId, actorId);
+      if (!role) {
         return response(404, {
           message: `No role found for actor ${actorId} in movie ${movieId}`,
         });
       }
-      return response(200, { data: toRole(roleResult.Item) });
+      return response(200, { data: role });
     }
 
     // No filter: the m#movieID partition holds the movie item plus all its roles.
@@ -61,7 +56,6 @@ export const handler = async (
     }
     return response(200, { data: resultItems.filter(isRoleItem).map(toRole) });
   } catch (err) {
-    console.error("DynamoDB error:", err);
-    return response(500, { message: "Internal server error" });
+    return serverError(err);
   }
 };

@@ -133,3 +133,37 @@ The application should log all user requests to CloudWatch logs. A log entry sho
      1. Refactor at each stage to improve code quality, e.g. DRY, variable naming, redundant debugging code, etc.
 
 [moodle]: https://moodle.setu.ie/mod/assign/view.php?id=4868989
+
+Implementation notes
+
+All endpoints in the specification are implemented, together with user and administrator authentication and request logging.
+
+Endpoints
+Method	Path	Auth	Responses
+GET	/movies/{movieID}/roles[?actor=actorID]	Cognito user (cookie)	200, 400 (invalid ID), 404 (unknown movie / no such role)
+GET	/actors/{actorID}[?movie=movieID]	Cognito user (cookie)	200, 400 (invalid ID), 404 (unknown actor)
+POST	/movies/roles	Admin API key (x-api-key header)	201, 400 (invalid body), 404 (unknown movie or actor), 409 (role already exists)
+
+Requests without valid credentials are rejected by API Gateway (401/403) before reaching a Lambda.
+
+Design decisions
+?actor= returns the single matching role as an object, rather than a one-item list.
+?movie= adds roleDescription to the actor profile. If the actor has no role in that movie, the profile is returned on its own ("if relevant").
+POST /movies/roles writes the role in a DynamoDB transaction that also checks the movie and actor exist. The role is only written if it does not already exist, so a role is never saved for a missing movie or actor, and duplicates return 409.
+IDs in paths, query strings and request bodies must be positive integers within JavaScript's safe integer range; otherwise 400 is returned.
+500 responses never include internal error details; the cause is logged to CloudWatch instead.
+Every request is logged as <username>   <path>. GET requests log the Cognito username; POST requests log admin, since the administrator authenticates with an API key rather than a Cognito account.
+Shared logic (role lookup, error responses, ID parsing) lives in lambdas/shared/.
+Deploying
+bash
+npm install
+npx cdk deploy --all
+
+The outputs include the Auth API URL, the App API URL and the administrator API key ID.
+
+Testing
+User access (GET): sign up via POST <AuthApiUrl>auth/signup with { username, password, email }, confirm via auth/confirm_signup with { username, code }, then sign in via auth/signin with { username, password }. Send the returned token on App API requests as the cookie token=<IdToken>.
+Admin access (POST): retrieve the key value and send it in the x-api-key header:
+bash
+   aws apigateway get-api-key --include-value --api-key <AdminApiKeyId> --query value --output text
+Logs: each Lambda's log group in CloudWatch shows one <username>   <path> line per request.

@@ -3,13 +3,12 @@ import { GetCommand } from "@aws-sdk/lib-dynamodb";
 import {
   actorKey,
   ddb,
+  getRole,
   parseId,
   tableName,
   toActor,
-  movieKey,
-  toRole
 } from "../shared/db";
-import { response } from "../shared/http";
+import { response, serverError } from "../shared/http";
 import { logRequest } from "../shared/request-logger";
 
 export const handler = async (
@@ -27,34 +26,27 @@ export const handler = async (
   if (movieParam !== undefined && movieId === undefined) {
     return response(400, { message: "movie must be a positive integer" });
   }
-    try {
-    const [actorResult, roleResult] = await Promise.all([
-      ddb.send(
-        new GetCommand({
-          TableName: tableName,
-          Key: { PK: actorKey(actorId), SK: actorKey(actorId) },
-        })
-      ),
-      movieId === undefined
-        ? undefined
-        : ddb.send(
-            new GetCommand({
-              TableName: tableName,
-              Key: { PK: movieKey(movieId), SK: actorKey(actorId) },
-            })
-          ),
-    ]);
+  try {
+    const actorResult = await ddb.send(
+      new GetCommand({
+        TableName: tableName,
+        Key: { PK: actorKey(actorId), SK: actorKey(actorId) },
+      })
+    );
+
     if (!actorResult.Item) {
       return response(404, { message: `Actor ${actorId} not found` });
     }
     const actor = toActor(actorResult.Item);
-
-    const role = roleResult?.Item ? toRole(roleResult.Item) : undefined;
-    return response(200, {
-      data: role ? { ...actor, roleDescription: role.roleDescription } : actor,
-    });
+    // ?movie= : add the actor's role description in that movie, if they have one.
+    if (movieId !== undefined) {
+      const role = await getRole(movieId, actorId);
+      if (role) {
+        return response(200, { data: { ...actor, roleDescription: role.roleDescription } });
+      }
+    }
+    return response(200, { data: actor });
   } catch (err) {
-    console.error("DynamoDB error:", err);
-    return response(500, { message: "Internal server error" });
+    return serverError(err);
   }
 };

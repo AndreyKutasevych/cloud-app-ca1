@@ -1,8 +1,8 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
-import { TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { TransactionCanceledException } from "@aws-sdk/client-dynamodb";
+import { TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { actorKey, ddb, movieKey, type Role, tableName } from "../shared/db";
-import { isResponse, parseJsonObject, response } from "../shared/http";
+import { isResponse, parseJsonObject, response, serverError } from "../shared/http";
 import { logRequest } from "../shared/request-logger";
 
 // IDs are JSON numbers (not strings) and must be positive integers.
@@ -14,11 +14,11 @@ const isNonEmptyString = (value: unknown): boolean =>
 export const handler = async (
   event: APIGatewayProxyEvent
 ): Promise<APIGatewayProxyResult> => {
-  const body = parseJsonObject(event);
   logRequest(event);
+  const body = parseJsonObject(event);
   if (isResponse(body)) return body;
 
-    const invalidFields = [
+  const invalidFields = [
     ["movieId", isPositiveInteger(body.movieId)],
     ["actorId", isPositiveInteger(body.actorId)],
     ["roleName", isNonEmptyString(body.roleName)],
@@ -39,7 +39,7 @@ export const handler = async (
     roleDescription: body.roleDescription as string,
   };
 
-    try {
+  try {
     // One transaction: the movie and actor must exist, and the role must be new.
     await ddb.send(
       new TransactWriteCommand({
@@ -70,6 +70,7 @@ export const handler = async (
     );
     return response(201, { message: "Role added", data: role });
   } catch (err) {
+    // CancellationReasons are in TransactItems order: movie, actor, role.
     if (err instanceof TransactionCanceledException) {
       const [movie, actor, existingRole] = (err.CancellationReasons ?? []).map(
         (reason) => reason.Code === "ConditionalCheckFailed"
@@ -82,7 +83,6 @@ export const handler = async (
         });
       }
     }
-    console.error("DynamoDB error:", err);
-    return response(500, { message: "Internal server error" });
+    return serverError(err);
   }
 };
