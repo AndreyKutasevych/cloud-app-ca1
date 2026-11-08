@@ -41,16 +41,23 @@ export const handler = async (
       return response(200, { data: role });
     }
 
-    // No filter: the m#movieID partition holds the movie item plus all its roles.
-    const queryResult = await ddb.send(
-      new QueryCommand({
-        TableName: tableName,
-        KeyConditionExpression: "PK = :pk",
-        ExpressionAttributeValues: { ":pk": movieKey(movieId) },
-      })
-    );
-
-    const resultItems = queryResult.Items ?? [];
+        // No filter: the m#movieID partition holds the movie item plus all its roles.
+    // A query returns at most 1 MB per call; follow LastEvaluatedKey for the rest.
+    const resultItems: Record<string, unknown>[] = [];
+    let lastKey: Record<string, unknown> | undefined;
+    do {
+      const page = await ddb.send(
+        new QueryCommand({
+          TableName: tableName,
+          KeyConditionExpression: "PK = :pk",
+          ExpressionAttributeValues: { ":pk": movieKey(movieId) },
+          ExclusiveStartKey: lastKey,
+        })
+      );
+      resultItems.push(...(page.Items ?? []));
+      lastKey = page.LastEvaluatedKey;
+    } while (lastKey);
+    
     if (!resultItems.some(isMovieItem)) {
       return response(404, { message: `Movie ${movieId} not found` });
     }
